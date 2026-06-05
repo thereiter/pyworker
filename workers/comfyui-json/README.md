@@ -104,13 +104,17 @@ Images will be saved locally AND uploaded to `s3://{bucket}/comfyui/{filename}`.
 
 ### Custom Benchmark Workflows
 
-You can provide a custom ComfyUI workflow for benchmarking by creating `workers/comfyui-json/misc/benchmark.json`. This allows you to test performance using your preferred models and workflow complexity.
+You can provide a custom ComfyUI workflow for benchmarking. This allows you to test performance using your preferred models and workflow complexity.
 
-**Ways to provide the benchmark file:**
-- Fork this repository and add your `benchmark.json` file
-- Write the file during worker provisioning (onstart script or setup phase)
+**Ways to provide the benchmark file** (in resolution order — first match wins):
 
-An example file is provided in the repository. To ensure varied generations, use the placeholder `__RANDOM_INT__` in place of static seed values - it will be replaced with a random integer for each benchmark run.
+1. **Fork this repository** and commit your workflow to `workers/comfyui-json/misc/benchmark.json`.
+2. **Write the file during provisioning** to a path *outside* the pyworker tree (e.g. `/workspace/benchmark.json`) and export `BENCHMARK_JSON_PATH` so the worker can find it. The pyworker repo is cloned by `start_server.sh` *after* provisioning runs, so provisioning cannot write into `misc/` directly — the destination would be clobbered, or the clone would fail.
+3. **Run on the vast.ai ComfyUI base image.** Its `convert-workflows.sh` maintains `/opt/comfyui-api-wrapper/workflows/pyworker_benchmark.json` as a symlink to the first provisioned workflow; the worker reads this automatically when neither of the above is set. No env var required.
+
+If `BENCHMARK_JSON_PATH` is set but points at a missing or unreadable file, the worker logs a warning and falls through to the next tier rather than going straight to the SD1.5 fallback.
+
+An example workflow is provided at `workers/comfyui-json/misc/benchmark.json.example`. To ensure varied generations, use the placeholder `__RANDOM_INT__` in place of static seed values — it will be replaced with a random integer for each benchmark run.
 
 ### Default Benchmark (Fallback)
 
@@ -120,9 +124,10 @@ The default benchmark uses Stable Diffusion v1.5 with ComfyUI's standard text-to
 
 | Environment Variable | Default Value | Description |
 | -------------------- | ------------- | ----------- |
-| BENCHMARK_TEST_WIDTH | 512 | Image width (pixels) |
-| BENCHMARK_TEST_HEIGHT | 512 | Image height (pixels) |
-| BENCHMARK_TEST_STEPS | 20 | Number of denoising steps |
+| BENCHMARK_JSON_PATH | (unset) | Path to a custom workflow file outside the pyworker tree. Used if `misc/benchmark.json` is absent. Falls through to `/opt/comfyui-api-wrapper/workflows/pyworker_benchmark.json` if set but missing. |
+| BENCHMARK_TEST_WIDTH | 512 | Fallback benchmark: image width (pixels) |
+| BENCHMARK_TEST_HEIGHT | 512 | Fallback benchmark: image height (pixels) |
+| BENCHMARK_TEST_STEPS | 20 | Fallback benchmark: number of denoising steps |
 
 Each benchmark run uses a random prompt from `misc/test_prompts.txt` and a random seed to ensure consistent GPU load patterns.
 
