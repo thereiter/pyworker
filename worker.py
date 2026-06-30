@@ -6,6 +6,7 @@ OpenAI server. Autoscaler workload scales with the number of documents per reque
 
 Deploy by pointing PYWORKER_REPO at this repository on a Vast vLLM serverless template.
 """
+import glob
 import os
 
 from vastai import Worker, WorkerConfig, HandlerConfig, BenchmarkConfig, LogActionConfig
@@ -15,6 +16,8 @@ MODEL_SERVER_PORT = 18000
 MODEL_LOG_FILE    = "/var/log/portal/vllm.log"
 MODEL_HEALTHCHECK = "/health"
 MODEL = os.environ.get("MODEL_NAME", "")
+# Front images pre-staged on disk by the template onstart (file:// reads avoid base64 over the wire).
+MEDIA_DIR = os.environ.get("MEDIA_DIR", "/workspace/photos")
 
 
 def n_docs(payload):
@@ -28,8 +31,17 @@ def n_docs(payload):
     return 1.0
 
 
+def _img(path):
+    return {"content": [{"type": "image_url", "image_url": {"url": "file://" + path}}]}
+
+
 def score_benchmark():
-    """Minimal text-only /v1/score request used once at startup for throughput estimation."""
+    """Representative startup benchmark for the autoscaler. Uses pre-staged local images (1 query
+    vs ~10 docs) so the perf estimate reflects the real multimodal workload; falls back to a tiny
+    text-only request when no media is staged."""
+    imgs = sorted(glob.glob(f"{MEDIA_DIR}/*/0.jpg"))[:11]
+    if len(imgs) >= 2:
+        return {"model": MODEL, "text_1": _img(imgs[0]), "text_2": [_img(p) for p in imgs[1:]]}
     return {"model": MODEL, "text_1": "example query", "text_2": ["document one", "document two"]}
 
 
