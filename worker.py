@@ -1,8 +1,12 @@
 """Custom Vast Serverless PyWorker.
 
-Adds /v1/score and /v1/rerank routes (vLLM pooling / cross-encoder scoring) that the
-stock `openai` worker does not expose, and forwards both verbatim to the local vLLM
-OpenAI server. Autoscaler workload scales with the number of documents per request.
+Adds /v1/score, /v1/rerank and /v1/embeddings routes (vLLM pooling: cross-encoder scoring +
+embeddings) that the stock `openai` worker does not expose, and forwards them verbatim to the
+local model server. Autoscaler workload scales with the number of documents / inputs per request.
+
+For a single-model worker this points straight at one vLLM OpenAI server. For a co-hosted worker
+(two vLLM servers on one GPU) point the model server at a small path-routing proxy that fans
+/v1/embeddings to one server and the scoring routes to the other.
 
 Deploy by pointing PYWORKER_REPO at this repository on a Vast vLLM serverless template.
 """
@@ -28,6 +32,17 @@ def n_docs(payload):
     text_2 = payload.get("text_2")             # /v1/score schema: text_1=query, text_2=[docs]
     if isinstance(text_2, list):
         return float(max(1, len(text_2)))
+    return 1.0
+
+
+def n_inputs(payload):
+    """Autoscaler cost ~ number of inputs in an embeddings request."""
+    inp = payload.get("input")                 # /v1/embeddings schema
+    if isinstance(inp, list):
+        return float(max(1, len(inp)))
+    msgs = payload.get("messages")             # chat-style multimodal embed
+    if isinstance(msgs, list):
+        return 1.0
     return 1.0
 
 
@@ -63,6 +78,12 @@ worker_config = WorkerConfig(
             allow_parallel_requests=True,
             max_queue_time=600.0,
             workload_calculator=n_docs,
+        ),
+        HandlerConfig(
+            route="/v1/embeddings",
+            allow_parallel_requests=True,
+            max_queue_time=600.0,
+            workload_calculator=n_inputs,
         ),
     ],
     log_action_config=LogActionConfig(
